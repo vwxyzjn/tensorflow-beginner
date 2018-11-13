@@ -1,0 +1,10 @@
+version: '3'
+services:
+  rlenv:
+    image: drexel-reinforcement-learning/tensorflow-beginner:0.0.4
+    ports:
+     - 8888:8888
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/root
