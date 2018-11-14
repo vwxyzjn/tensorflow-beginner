@@ -121,3 +121,4 @@ dmypy.json
 .cache/*
 .local/*
 .bash_history
+.keras/keras.json
