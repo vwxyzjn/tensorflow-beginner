@@ -1,4 +1,7 @@
 {
   "editor.formatOnSave": true,
-  "python.linting.enabled": false
+  "python.linting.pylintArgs": [
+    "--extension-pkg-whitelist=numpy",
+    "--disable=C"
+  ]
 }
