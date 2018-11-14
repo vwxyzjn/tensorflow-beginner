@@ -1,9 +1,10 @@
 version: '3'
 services:
   rlenv:
-    image: drexel-reinforcement-learning/tensorflow-beginner:0.0.4
+    image: drexel-reinforcement-learning/tensorflow-beginner:0.0.5
     ports:
      - 8888:8888
+     - 6006:6006 
     stdin_open: true
     tty: true
     volumes:
