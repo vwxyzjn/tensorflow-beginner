@@ -3,5 +3,6 @@
   "python.linting.pylintArgs": [
     "--extension-pkg-whitelist=numpy",
     "--disable=W0621,C0111,C0103,C0301,C0330"
-  ]
+  ],
+  "python.formatting.provider": "black"
 }
