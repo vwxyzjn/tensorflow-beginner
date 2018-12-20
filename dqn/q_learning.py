@@ -3,19 +3,22 @@
 # https://towardsdatascience.com/reinforcement-learning-with-python-8ef0242a2fa2
 
 import gym
-import math
 import random
 import numpy as np
 from itertools import product
+import matplotlib.pyplot as plt
 
 ## Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
 SEED = 1
 NUM_EPISODES = 10000
-PARTITION_STATE_NUMBER = 4
-ALPHA = 0.1  # learning rate
+BUCKET_CART_POSITION_NUMBER = 6
+BUCKET_CART_VELOCITY_NUMBER = 3
+BUCKET_CART_POLE_ANGLE_NUMBER = 6
+BUCKET_CART_VELOCITY_AT_TIP_NUMBER = 3
+ALPHA = 0.3  # learning rate
 GAMMA = 0.6  # discount factor
-EPSILON = 0.1
+EPSILON = 0.2
 
 ## Initialize env
 env = gym.make("CartPole-v0")
@@ -24,14 +27,21 @@ env.seed(SEED)
 
 ## State preprocessing
 # State buckets based on https://github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
-bucket_cart_position = np.linspace(-4.8, 4.8, PARTITION_STATE_NUMBER)
-bucket_cart_velocity = np.linspace(-10, 10, PARTITION_STATE_NUMBER)
-bucket_cart_pole_angle = np.linspace(-0.418, 0.418, PARTITION_STATE_NUMBER)
-bucket_cart_velocity_at_tip = np.linspace(-10, 10, PARTITION_STATE_NUMBER)
+bucket_cart_position = np.linspace(-4.9, 4.9, BUCKET_CART_POSITION_NUMBER)
+bucket_cart_velocity = [0]
+bucket_cart_pole_angle = np.linspace(-0.419, 0.419, BUCKET_CART_POLE_ANGLE_NUMBER)
+bucket_cart_velocity_at_tip = [0]
 
 # All possible states
 all_states = {}
-cartesian_produc = product(*[range(4) for _ in range(4)])
+cartesian_produc = product(
+    *[
+        range(1, BUCKET_CART_POSITION_NUMBER),
+        range(BUCKET_CART_VELOCITY_NUMBER),
+        range(1, BUCKET_CART_POLE_ANGLE_NUMBER),
+        range(BUCKET_CART_VELOCITY_AT_TIP_NUMBER),
+    ]
+)
 for index, item in enumerate(list(cartesian_produc)):
     all_states[item] = index
 
@@ -51,6 +61,7 @@ def process_state(raw_state):
 q_table = np.zeros([len(all_states.values()), env.action_space.n])
 
 ## Start the env
+episode_rewards = []
 for i_episode in range(NUM_EPISODES):
     raw_state = env.reset()
     done = False
@@ -71,3 +82,6 @@ for i_episode in range(NUM_EPISODES):
 
     if i_episode % 100 == 0:
         print("Episode: ", i_episode, "finished with rewards of ", episode_reward)
+        episode_rewards += [episode_reward]
+
+plt.plot(episode_rewards)
