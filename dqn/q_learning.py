@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 # https://en.wikipedia.org/wiki/Q-learning
 SEED = 1
 NUM_EPISODES = 10000
-BUCKET_CART_POSITION_NUMBER = 6
+BUCKET_CART_POSITION_NUMBER = 3
 BUCKET_CART_VELOCITY_NUMBER = 3
 BUCKET_CART_POLE_ANGLE_NUMBER = 6
 BUCKET_CART_VELOCITY_AT_TIP_NUMBER = 3
@@ -27,19 +27,19 @@ env.seed(SEED)
 
 ## State preprocessing
 # State buckets based on https://github.com/openai/gym/blob/master/gym/envs/classic_control/cartpole.py
-bucket_cart_position = np.linspace(-2.4, 2.4, BUCKET_CART_POSITION_NUMBER)
-bucket_cart_velocity = np.linspace(-1, 1, BUCKET_CART_VELOCITY_NUMBER)
-bucket_cart_pole_angle = np.linspace(-0.35, 0.35, BUCKET_CART_POLE_ANGLE_NUMBER)
-bucket_cart_velocity_at_tip = np.linspace(-3.5, 3.5, BUCKET_CART_VELOCITY_AT_TIP_NUMBER)
+bucket_cart_position = np.linspace(-4.9, 4.9, BUCKET_CART_POSITION_NUMBER)
+bucket_cart_velocity = [0]
+bucket_cart_pole_angle = np.linspace(-0.419, 0.419, BUCKET_CART_POLE_ANGLE_NUMBER)
+bucket_cart_velocity_at_tip = [0]
 
 # All possible states
 all_states = {}
 cartesian_produc = product(
     *[
-        range(BUCKET_CART_POSITION_NUMBER + 1),
-        range(BUCKET_CART_VELOCITY_NUMBER + 1),
-        range(BUCKET_CART_POLE_ANGLE_NUMBER + 1),
-        range(BUCKET_CART_VELOCITY_AT_TIP_NUMBER + 1),
+        range(1, BUCKET_CART_POSITION_NUMBER),
+        range(BUCKET_CART_VELOCITY_NUMBER),
+        range(1, BUCKET_CART_POLE_ANGLE_NUMBER),
+        range(BUCKET_CART_VELOCITY_AT_TIP_NUMBER),
     ]
 )
 for index, item in enumerate(list(cartesian_produc)):
