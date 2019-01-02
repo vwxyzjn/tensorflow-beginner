@@ -1,160 +1,148 @@
-"""
-Q-learning approach for different RL problems
-as part of the basic series on reinforcement learning @
-https://github.com/vmayoral/basic_reinforcement_learning
-Inspired by https://gym.openai.com/evaluations/eval_kWknKOkPQ7izrixdhriurA
-        @author: Victor Mayoral Vilches <victor@erlerobotics.com>
-"""
+# https://github.com/omerbsezer/QLearning_CartPole/blob/master/QLearningCartPole.py
+
+# https://en.wikipedia.org/wiki/Inverted_pendulum
+# environment: https://github.com/openai/gym/wiki/CartPole-v0
+# 2 actions: 0:push_left, 1:push_right
+# 4 observations: 0:cart_position ; 1:cart_volecity ; 2:pole_angle; 3:pole_volecity_at_tip
+
 import gym
-import numpy
+import numpy as np
 import random
-import pandas
+import math
 import matplotlib.pyplot as plt
 
 
-class QLearn:
-    def __init__(self, actions, epsilon, alpha, gamma):
-        self.q = {}
-        self.epsilon = epsilon  # exploration constant
-        self.alpha = alpha  # discount constant
-        self.gamma = gamma  # discount factor
-        self.actions = actions
+# initialize the "Cart-Pole" environment
+environment_name = "CartPole-v0"
+environment = gym.make(environment_name)
+environment.seed(0)
 
-    def getQ(self, state, action):
-        return self.q.get((state, action), 0.0)
 
-    def learnQ(self, state, action, reward, value):
-        """
-        Q-learning:
-            Q(s, a) += alpha * (reward(s,a) + max(Q(s') - Q(s,a))
-        """
-        oldv = self.q.get((state, action), None)
-        if oldv is None:
-            self.q[(state, action)] = reward
+# 4 observations: 0:cart_position ; 1:cart_volecity ; 2:pole_angle; 3:pole_volecity_at_tip
+# number of discrete states  per state dimension
+number_states = (9, 9, 9, 9)  # (x, x', theta, theta')
+
+# 2 actions: 0:push_left, 1:push_right
+# number of discrete actions
+number_actions = environment.action_space.n  # (left, right)
+
+# bounds for each discrete state
+state_bounds = list(
+    zip(environment.observation_space.low, environment.observation_space.high)
+)
+state_bounds[1] = [-1, 1]
+state_bounds[3] = [-math.radians(50), math.radians(50)]
+
+# simulation related constants
+max_iteration = 1000
+max_step = 250
+success_to_end = 100
+pretest_number = 199
+
+# learning related constants
+min_explore_rate = 0.01
+min_learning_rate = 0.1
+
+# create qTable with zeros
+q_table = np.zeros(number_states + (number_actions,))
+
+
+def observation_to_state(observation):
+    states_list = []
+    for i in range(len(observation)):
+        if observation[i] <= state_bounds[i][0]:
+            state_index = 0
+        elif observation[i] >= state_bounds[i][1]:
+            state_index = number_states[i] - 1
         else:
-            self.q[(state, action)] = oldv + self.alpha * (value - oldv)
-
-    def chooseAction(self, state, return_q=False):
-        q = [self.getQ(state, a) for a in self.actions]
-        maxQ = max(q)
-
-        if random.random() < self.epsilon:
-            minQ = min(q)
-            mag = max(abs(minQ), abs(maxQ))
-            # add random values to all the actions, recalculate maxQ
-            q = [
-                q[i] + random.random() * mag - 0.5 * mag
-                for i in range(len(self.actions))
-            ]
-            maxQ = max(q)
-
-        count = q.count(maxQ)
-        # In case there're several state-action max values
-        # we select a random one among them
-        if count > 1:
-            best = [i for i in range(len(self.actions)) if q[i] == maxQ]
-            i = random.choice(best)
-        else:
-            i = q.index(maxQ)
-
-        action = self.actions[i]
-        if return_q:  # if they want it, give it!
-            return action, q
-        return action
-
-    def learn(self, state1, action1, reward, state2):
-        maxqnew = max([self.getQ(state2, a) for a in self.actions])
-        self.learnQ(state1, action1, reward, reward + self.gamma * maxqnew)
+            # map the state bounds to the state array
+            bound_width = state_bounds[i][1] - state_bounds[i][0]
+            offset = (number_states[i] - 1) * state_bounds[i][0] / bound_width
+            scaling = (number_states[i] - 1) / bound_width
+            state_index = int(round(scaling * observation[i] - offset))
+        states_list.append(state_index)
+    return tuple(states_list)
 
 
-def build_state(features):
-    return int("".join(map(lambda feature: str(int(feature)), features)))
+def select_action(state, explore_rate):
+    # select a random action
+    if random.random() < explore_rate:
+        action = environment.action_space.sample()
+    # select the action with the highest q
+    else:
+        action = np.argmax(q_table[state])
+    return action
 
 
-def to_bin(value, bins):
-    return numpy.digitize(x=[value], bins=bins)[0]
+def get_explore_rate(t):
+    return max(min_explore_rate, min(1, 1.0 - math.log10((t + 1) / 25)))
+
+
+def get_learning_rate(t):
+    return max(min_learning_rate, min(0.5, 1.0 - math.log10((t + 1) / 25)))
 
 
 if __name__ == "__main__":
-    env = gym.make("CartPole-v0")
 
-    goal_average_steps = 195
-    max_number_of_steps = 200
-    last_time_steps = numpy.ndarray(0)
-    n_bins = 8
-    n_bins_angle = 10
+    # initial learning parameters
+    learning_rate = get_learning_rate(0)
+    explore_rate = get_explore_rate(0)
+    discount_factor = 0.98
 
-    number_of_features = env.observation_space.shape[0]
-    last_time_steps = numpy.ndarray(0)
-
-    # Number of states is huge so in order to simplify the situation
-    # we discretize the space to: 10 ** number_of_features
-    cart_position_bins = pandas.cut([-2.4, 2.4], bins=n_bins, retbins=True)[1][1:-1]
-    pole_angle_bins = pandas.cut([-2, 2], bins=n_bins_angle, retbins=True)[1][1:-1]
-    cart_velocity_bins = pandas.cut([-1, 1], bins=n_bins, retbins=True)[1][1:-1]
-    angle_rate_bins = pandas.cut([-3.5, 3.5], bins=n_bins_angle, retbins=True)[1][1:-1]
-
-    # The Q-learn algorithm
-    qlearn = QLearn(
-        actions=range(env.action_space.n), alpha=0.5, gamma=0.90, epsilon=0.1
-    )
-
+    num_success = 0
     episode_rewards = []
-    for i_episode in range(3000):
-        observation = env.reset()
 
-        cart_position, pole_angle, cart_velocity, angle_rate_of_change = observation
-        state = build_state(
-            [
-                to_bin(cart_position, cart_position_bins),
-                to_bin(pole_angle, pole_angle_bins),
-                to_bin(cart_velocity, cart_velocity_bins),
-                to_bin(angle_rate_of_change, angle_rate_bins),
-            ]
-        )
-        episode_reward = 0
+    # training for maximum iteration episodes
+    for i in range(max_iteration):
 
-        for t in range(max_number_of_steps):
-            # env.render()
+        # reset the environment
+        observation = environment.reset()
+        total_reward = 0
+        # the initial state
+        state_0 = observation_to_state(observation)
 
-            # Pick an action based on the current state
-            action = qlearn.chooseAction(state)
-            # Execute the action and get feedback
-            observation, reward, done, info = env.step(action)
-            episode_reward += reward
-
-            # Digitize the observation to get a state
-            cart_position, pole_angle, cart_velocity, angle_rate_of_change = observation
-            nextState = build_state(
-                [
-                    to_bin(cart_position, cart_position_bins),
-                    to_bin(pole_angle, pole_angle_bins),
-                    to_bin(cart_velocity, cart_velocity_bins),
-                    to_bin(angle_rate_of_change, angle_rate_bins),
-                ]
+        # each episode is max_step long
+        for t in range(max_step):
+            # environment.render()
+            # select an action
+            action = select_action(state_0, explore_rate)
+            # get observation, reward and done after each step, execute the action
+            observation, reward, done, _ = environment.step(action)
+            # observe the result
+            state = observation_to_state(observation)
+            # update the Q table
+            # Bellmann eq: Q(s,a)=reward + discount_factor* max(Q(s_,a_))  ::: Q_target = reward+discount_factor*max(Qs_prime)
+            # TD_target=(reward + discount_factor * (best_q))
+            # TD_error=(reward + discount_factor * (best_q) - q_table[state_0 + (action,)])
+            best_q = np.amax(q_table[state])
+            q_table[state_0 + (action,)] = q_table[
+                state_0 + (action,)
+            ] + learning_rate * (
+                reward + discount_factor * (best_q) - q_table[state_0 + (action,)]
             )
+            # setting up for the next iteration
+            state_0 = state
 
-            # # If out of bounds
-            # if (cart_position > 2.4 or cart_position < -2.4):
-            #     reward = -200
-            #     qlearn.learn(state, action, reward, nextState)
-            #     print("Out of bounds, reseting")
-            #     break
+            total_reward += reward
 
-            if not (done):
-                qlearn.learn(state, action, reward, nextState)
-                state = nextState
-            else:
-                # Q-learn stuff
-                reward = -200
-                qlearn.learn(state, action, reward, nextState)
-                last_time_steps = numpy.append(last_time_steps, [int(t + 1)])
-                break
+            if done:
+                print(
+                    "Iteration No: %d -- TimeSteps:%d -- Success: %d -- Best Q: %f --Explore rate: %f --Learning rate: %f --Total reward: %d"
+                    % (
+                        i + 1,
+                        t,
+                        num_success,
+                        best_q,
+                        explore_rate,
+                        learning_rate,
+                        total_reward,
+                    )
+                )
+                # after pretest_number
+                episode_rewards += [total_reward]
 
-        if i_episode % 20 == 0:
-            print("Episode: ", i_episode, "finished with rewards of ", episode_reward)
-            episode_rewards += [episode_reward]
-
-    env.close()
+        # update parameters
+        explore_rate = get_explore_rate(i)
+        learning_rate = get_learning_rate(i)
 
     plt.plot(episode_rewards)
