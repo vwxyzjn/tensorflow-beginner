@@ -11,12 +11,12 @@ ALPHA_MIN = 0.2
 EPSILON_MAX = 1  # exploration rate
 EPSILON_MIN = 0.05
 GAMMA = 0.9  # discount factor
-MAX_LEARNING_RATE_DECAY_DURATION = 25
-MAX_EXPLORATION_RATE_DECAY_DURATION = 25
+MAX_LEARNING_RATE_DECAY_DURATION = 5000
+MAX_EXPLORATION_RATE_DECAY_DURATION = 5000
 
 # Training parameters
-SEED = 1
-NUM_EPISODES = 3000
+SEED = 2
+NUM_EPISODES = 20000
 MAX_NUM_STEPS = 200
 
 ## Initialize env
@@ -24,6 +24,7 @@ MAX_NUM_STEPS = 200
 env = gym.make("Taxi-v2")
 random.seed(SEED)
 env.seed(SEED)
+np.random.seed(SEED)
 
 # Initialize the q_table
 q_table = np.zeros((env.observation_space.n,) + (env.action_space.n,))

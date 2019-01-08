@@ -7,16 +7,16 @@ import random
 
 # Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
-ALPHA = 0.1  # learning rate
+ALPHA = 0.01  # learning rate
 EPSILON_MAX = 1  # exploration rate
 EPSILON_MIN = 0.05
-GAMMA = 0.9  # discount factor
-MAX_LEARNING_RATE_DECAY_DURATION = 25
-MAX_EXPLORATION_RATE_DECAY_DURATION = 25
+GAMMA = 0.4  # discount factor
+MAX_LEARNING_RATE_DECAY_DURATION = 300
+MAX_EXPLORATION_RATE_DECAY_DURATION = 300
 
 # Training parameters
 SEED = 1
-NUM_EPISODES = 3000
+NUM_EPISODES = 15000
 MAX_NUM_STEPS = 200
 
 ## Initialize env
