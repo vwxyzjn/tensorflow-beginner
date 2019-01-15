@@ -5,13 +5,16 @@ import random
 
 # Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
-ALPHA = 0.1
-GAMMA = 0.6
-EPSILON = 0.1
+ALPHA = 0.5  # learning rate
+EPSILON_MAX = 1  # exploration rate
+EPSILON_MIN = 0.01
+GAMMA = 0.9  # discount factor
+MAX_LEARNING_RATE_DECAY_DURATION = 5000
+MAX_EXPLORATION_RATE_DECAY_DURATION = 5000
 
 # Training parameters
 SEED = 2
-NUM_EPISODES = 5000
+NUM_EPISODES = 10000
 MAX_NUM_STEPS = 200
 
 ## Initialize env
@@ -24,16 +27,21 @@ np.random.seed(SEED)
 # Initialize the q_table
 q_table = np.zeros((env.observation_space.n,) + (env.action_space.n,))
 
+# Utilities functions
+def get_explore_rate(t):
+    return max((EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_DURATION + EPSILON_MAX, EPSILON_MIN)
+
 # Start the training process
 finished_episodes_count = 0
 episode_rewards = []
 for i_episode in range(NUM_EPISODES):
+    epsilon = get_explore_rate(i_episode)
     raw_state = env.reset()
     done = False
     episode_reward = 0
     for t in range(MAX_NUM_STEPS):
         # env.render()
-        if random.random() < EPSILON:
+        if random.random() < epsilon:
             action = random.randint(0, env.action_space.n - 1)
         else:
             # Crucial!!! If there are multiple actions with the same q-value, randomly select one.
