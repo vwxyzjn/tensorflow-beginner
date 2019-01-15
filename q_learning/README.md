@@ -15,7 +15,6 @@ q_table[old_raw_state, action] = (1 - ALPHA) * oldv + ALPHA * (
 while the correct solution should have been
 
 ```python
-oldv = q_table[(old_raw_state, action)]
 q_table[old_raw_state, action] = (1 - ALPHA) * oldv + ALPHA * (
     reward + GAMMA * np.max(q_table[raw_state])
 )
