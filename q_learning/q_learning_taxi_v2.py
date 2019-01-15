@@ -11,7 +11,7 @@ EPSILON = 0.1
 
 # Training parameters
 SEED = 2
-NUM_EPISODES = 100000
+NUM_EPISODES = 5000
 MAX_NUM_STEPS = 200
 
 ## Initialize env
@@ -34,9 +34,14 @@ for i_episode in range(NUM_EPISODES):
     for t in range(MAX_NUM_STEPS):
         # env.render()
         if random.random() < EPSILON:
-            action = env.action_space.sample()
+            action = random.randint(0, env.action_space.n - 1)
         else:
-            action = np.argmax(q_table[raw_state])
+            # Crucial!!! If there are multiple actions with the same q-value, randomly select one.
+            max_q_value_indices = np.where(
+                q_table[raw_state] == q_table[raw_state].max()
+            )[0]
+            action = random.choice(max_q_value_indices)
+
         old_raw_state = raw_state
         raw_state, reward, done, info = env.step(action)
 
@@ -47,17 +52,16 @@ for i_episode in range(NUM_EPISODES):
         episode_reward += reward
 
         # Update the q-table
-        old_value = q_table[old_raw_state, action]
-        next_max = np.max(q_table[raw_state])
-
-        new_value = (1 - ALPHA) * old_value + ALPHA * (reward + GAMMA * next_max)
-        q_table[old_raw_state, action] = new_value
+        oldv = q_table[(old_raw_state, action)]
+        q_table[old_raw_state, action] = (1 - ALPHA) * oldv + ALPHA * (
+            reward + GAMMA * np.max(q_table[raw_state])
+        )
         
-        
-#        oldv = q_table[(old_raw_state, action)]
-#        q_table[old_raw_state, action] = (1 - ALPHA) * oldv + ALPHA * (
-#            reward + GAMMA * np.argmax(q_table[raw_state])
-#        )
+        # What I had was 
+        # q_table[old_raw_state, action] = (1 - ALPHA) * oldv + ALPHA * (
+        #     reward + GAMMA * np.argmax(q_table[raw_state])
+        # )
+        # which was a terrible bug
         if done:
             break
 
