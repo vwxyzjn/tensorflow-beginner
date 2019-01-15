@@ -37,11 +37,10 @@ env.seed(SEED)
 np.random.seed(SEED)
 tf.random.set_random_seed(SEED)
 
-
 def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     with tf.variable_scope(scope):
         observation = tf.placeholder(tf.float32, [None, 1])
-        pred = tf.placeholder(tf.float32, [None, 1])
+        pred = tf.placeholder(tf.float32, [None,])
         fc1 = tf.contrib.layers.fully_connected(
             inputs=observation,
             num_outputs=64,
@@ -61,10 +60,12 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
             weights_initializer=tf.contrib.layers.xavier_initializer(),
         )
         action_distribution = tf.nn.softmax(fc3)
-        q_value = tf.math.reduce_max(action_distribution, keepdims=True)
-        loss = tf.losses.mean_squared_error(q_value, pred)
-        train_opt = tf.train.GradientDescentOptimizer(ALPHA).minimize(loss)
+        q_value = tf.math.reduce_max(fc3, axis=1)
+        loss = tf.losses.huber_loss(q_value, pred)
+        train_opt = tf.train.AdamOptimizer(ALPHA).minimize(loss)
         saver = tf.train.Saver()
+        tf.summary.scalar("Loss", loss)
+        write_op = tf.summary.merge_all()
     return (
         fc3,
         observation,
@@ -74,6 +75,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
         loss,
         train_opt,
         saver,
+        write_op,
     )
 
 
@@ -86,6 +88,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     loss,
     train_opt,
     saver,
+    write_op,
 ) = build_neural_network("q_network")
 (
     target_fc3,
@@ -96,6 +99,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     target_loss,
     target_train_opt,
     target_saver,
+    target_write_op,
 ) = build_neural_network("target_network")
 
 
@@ -103,7 +107,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
 # Start the training process
 with tf.Session() as sess:
     episode_rewards = []
-    saver.restore(sess, "/tmp/model.ckpt")
+    saver.restore(sess, "./tmp/model.ckpt")
     for i_episode in range(NUM_EPISODES):
         raw_state = env.reset()
         done = False

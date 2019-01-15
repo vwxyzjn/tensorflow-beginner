@@ -25,6 +25,7 @@ def restore_training_variables(
     for i, var in enumerate(variables):
         sess.run(tf.assign(var, vars_values[i]))
 
+
 # https://stable-baselines.readthedocs.io/en/master/_modules/stable_baselines/common/tf_util.html#make_session
 def make_session(num_cpu=None, make_default=False, graph=None):
     """
@@ -36,11 +37,12 @@ def make_session(num_cpu=None, make_default=False, graph=None):
     :return: (TensorFlow session)
     """
     if num_cpu is None:
-        num_cpu = int(os.getenv('RCALL_NUM_CPU', multiprocessing.cpu_count()))
+        num_cpu = int(os.getenv("RCALL_NUM_CPU", multiprocessing.cpu_count()))
     tf_config = tf.ConfigProto(
         allow_soft_placement=True,
         inter_op_parallelism_threads=num_cpu,
-        intra_op_parallelism_threads=num_cpu)
+        intra_op_parallelism_threads=num_cpu,
+    )
     # Prevent tensorflow from taking all the gpu memory
     tf_config.gpu_options.allow_growth = True
     if make_default:
@@ -51,7 +53,11 @@ def make_session(num_cpu=None, make_default=False, graph=None):
 
 # functions for graduatlly decrease learning rate using linear functions
 def get_explore_rate(t):
-    return max((EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_TIMESTEP + EPSILON_MAX, EPSILON_MIN)
+    return max(
+        (EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_TIMESTEP
+        + EPSILON_MAX,
+        EPSILON_MIN,
+    )
 
 
 # Replay Memory
@@ -84,7 +90,7 @@ ALPHA = 1e-3  # learning rate
 EPSILON_MAX = 1  # exploration rate
 EPSILON_MIN = 0.1
 GAMMA = 0.7  # discount factor
-MAX_EXPLORATION_RATE_DECAY_TIMESTEP= 5000
+MAX_EXPLORATION_RATE_DECAY_TIMESTEP = 5000
 TARGET_NETWORK_UPDATE_STEP_FREQUENCY = 500
 EXPERIENCER_REPLAY_BATCH_SIZE = 32
 
@@ -98,7 +104,9 @@ TOTAL_MAX_TIMESTEPS = 50000
 
 ## Initialize env
 # https://github.com/openai/gym/blob/master/gym/envs/toy_text/taxi.py
-env = gym.make("Taxi-v2").env # without the .env, there is gonna be a 200 max num steps.
+env = gym.make(
+    "Taxi-v2"
+).env  # without the .env, there is gonna be a 200 max num steps.
 random.seed(SEED)
 env.seed(SEED)
 np.random.seed(SEED)
@@ -108,7 +116,7 @@ tf.random.set_random_seed(SEED)
 def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     with tf.variable_scope(scope):
         observation = tf.placeholder(tf.float32, [None, 1])
-        pred = tf.placeholder(tf.float32, [None, 1])
+        pred = tf.placeholder(tf.float32, [None,])
         fc1 = tf.contrib.layers.fully_connected(
             inputs=observation,
             num_outputs=64,
@@ -128,11 +136,23 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
             weights_initializer=tf.contrib.layers.xavier_initializer(),
         )
         action_distribution = tf.nn.softmax(fc3)
-        q_value = tf.math.reduce_max(fc3, keepdims=True)
+        q_value = tf.math.reduce_max(fc3, axis=1)
         loss = tf.losses.huber_loss(q_value, pred)
         train_opt = tf.train.AdamOptimizer(ALPHA).minimize(loss)
         saver = tf.train.Saver()
-    return (fc3, observation, pred, action_distribution, q_value, loss, train_opt, saver)
+        tf.summary.scalar("Loss", loss)
+        write_op = tf.summary.merge_all()
+    return (
+        fc3,
+        observation,
+        pred,
+        action_distribution,
+        q_value,
+        loss,
+        train_opt,
+        saver,
+        write_op,
+    )
 
 
 (
@@ -143,7 +163,8 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     q_value,
     loss,
     train_opt,
-    saver
+    saver,
+    write_op,
 ) = build_neural_network("q_network")
 (
     target_fc3,
@@ -153,12 +174,14 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     target_q_value,
     target_loss,
     target_train_opt,
-    target_saver
+    target_saver,
+    target_write_op,
 ) = build_neural_network("target_network")
 
 # Start the training process
 with make_session(8) as sess:
     sess.run(tf.global_variables_initializer())
+    writer = tf.summary.FileWriter("./logs")
     restore_training_variables(
         "target_network", backup_training_variables("q_network", sess), sess
     )
@@ -179,7 +202,6 @@ with make_session(8) as sess:
             if random.random() < epsilon:
                 action = random.randint(0, env.action_space.n - 1)
             else:
-                # Crucial!!! If there are multiple actions with the same q-value, randomly select one.
                 evaluated_action_probability = sess.run(
                     action_distribution, feed_dict={observation: [[raw_state]]}
                 )
@@ -196,26 +218,26 @@ with make_session(8) as sess:
                 continue
             batch = er.sample(EXPERIENCER_REPLAY_BATCH_SIZE)
 
+            if done:
+                finished_episodes_count += 1
+
             # Predict
             # use the raw_state from the replay buffer, which is the column at index-3
             # https://stackoverflow.com/questions/4455076/how-to-access-the-ith-column-of-a-numpy-multidimensional-array
             # This is wrong.
-            if done:
-                finished_episodes_count += 1
-                y = sess.run(
-                    tf.fill(tf.shape(target_q_value), reward),
-                    feed_dict={target_observation: er.buffer[:, [3]]},
-                )
-            else:
-                evaluated_target_q_value = sess.run(
-                    target_q_value, feed_dict={target_observation: er.buffer[:, [3]]}
-                )
-                y = reward + GAMMA * evaluated_target_q_value
+            evaluated_target_q_value = sess.run(
+                target_q_value, feed_dict={target_observation: er.buffer[:, [3]]}
+            )
+            y = reward + GAMMA * evaluated_target_q_value
+            
 
             # Train
-            sess.run(
-                train_opt, feed_dict={observation: er.buffer[:, [0]], pred: y}
+            _, summary = sess.run(
+                [train_opt, write_op],
+                feed_dict={observation: er.buffer[:, [0]], pred: y},
             )  # the 0-index column is the old_raw_state
+
+            writer.add_summary(summary, total_timesteps)
 
             # Update the target network
             if target_network_update_counter > TARGET_NETWORK_UPDATE_STEP_FREQUENCY:
@@ -226,18 +248,21 @@ with make_session(8) as sess:
 
             if done:
                 break
-            
+
             if total_timesteps % 1000 == 0:
                 save_path = saver.save(sess, "./tmp/model.ckpt")
                 print("Model saved in path: %s" % save_path)
 
-        print("Episode: ", i_episode, "finished with rewards of ", episode_reward, "with successful drop-offs of", finished_episodes_count)
+        print(
+            "Episode: ",
+            i_episode,
+            "finished with rewards of ",
+            episode_reward,
+            "with successful drop-offs of",
+            finished_episodes_count,
+        )
         episode_rewards += [episode_reward]
         if total_timesteps > TOTAL_MAX_TIMESTEPS:
             break
-        
-
-    
-
 
     plt.plot(episode_rewards)
