@@ -51,7 +51,7 @@ def make_session(num_cpu=None, make_default=False, graph=None):
 
 # functions for graduatlly decrease learning rate using linear functions
 def get_explore_rate(t):
-    return (EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_TIMESTEP + EPSILON_MAX
+    return max((EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_TIMESTEP + EPSILON_MAX, EPSILON_MIN)
 
 
 # Replay Memory
@@ -80,19 +80,19 @@ class ExperienceReplay:
 
 # Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
-ALPHA = 0.005  # learning rate
+ALPHA = 1e-3  # learning rate
 EPSILON_MAX = 1  # exploration rate
-EPSILON_MIN = 0.02
-GAMMA = 0.5  # discount factor
-MAX_EXPLORATION_RATE_DECAY_TIMESTEP= 1000
+EPSILON_MIN = 0.1
+GAMMA = 0.7  # discount factor
+MAX_EXPLORATION_RATE_DECAY_TIMESTEP= 5000
 TARGET_NETWORK_UPDATE_STEP_FREQUENCY = 500
 EXPERIENCER_REPLAY_BATCH_SIZE = 32
 
 # Training parameters
-SEED = 2
+SEED = 1000
 NUM_EPISODES = 1000
 MAX_NUM_STEPS = 200
-TOTAL_MAX_TIMESTEPS = 100000
+TOTAL_MAX_TIMESTEPS = 50000
 # we picked 2000 because on average, the random agent would make a successful drop-off after 2848.14
 # timesteps according to https://www.learndatasci.com/tutorials/reinforcement-q-learning-scratch-python-openai-gym/
 
@@ -128,10 +128,11 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
             weights_initializer=tf.contrib.layers.xavier_initializer(),
         )
         action_distribution = tf.nn.softmax(fc3)
-        q_value = tf.math.reduce_max(action_distribution, keepdims=True)
-        loss = tf.losses.mean_squared_error(q_value, pred)
-        train_opt = tf.train.GradientDescentOptimizer(ALPHA).minimize(loss)
-    return (fc3, observation, pred, action_distribution, q_value, loss, train_opt)
+        q_value = tf.math.reduce_max(fc3, keepdims=True)
+        loss = tf.losses.huber_loss(q_value, pred)
+        train_opt = tf.train.AdamOptimizer(ALPHA).minimize(loss)
+        saver = tf.train.Saver()
+    return (fc3, observation, pred, action_distribution, q_value, loss, train_opt, saver)
 
 
 (
@@ -142,6 +143,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     q_value,
     loss,
     train_opt,
+    saver
 ) = build_neural_network("q_network")
 (
     target_fc3,
@@ -151,6 +153,7 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     target_q_value,
     target_loss,
     target_train_opt,
+    target_saver
 ) = build_neural_network("target_network")
 
 # Start the training process
@@ -196,6 +199,7 @@ with make_session(8) as sess:
             # Predict
             # use the raw_state from the replay buffer, which is the column at index-3
             # https://stackoverflow.com/questions/4455076/how-to-access-the-ith-column-of-a-numpy-multidimensional-array
+            # This is wrong.
             if done:
                 finished_episodes_count += 1
                 y = sess.run(
@@ -222,10 +226,18 @@ with make_session(8) as sess:
 
             if done:
                 break
+            
+            if total_timesteps % 1000 == 0:
+                save_path = saver.save(sess, "./tmp/model.ckpt")
+                print("Model saved in path: %s" % save_path)
 
         print("Episode: ", i_episode, "finished with rewards of ", episode_reward, "with successful drop-offs of", finished_episodes_count)
         episode_rewards += [episode_reward]
         if total_timesteps > TOTAL_MAX_TIMESTEPS:
             break
+        
+
+    
+
 
     plt.plot(episode_rewards)
