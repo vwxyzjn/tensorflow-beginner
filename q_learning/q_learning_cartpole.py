@@ -93,22 +93,15 @@ for i_episode in range(NUM_EPISODES):
             action = random.randint(0, 1)
         else:
             # Crucial!!! If there are multiple actions with the same q-value, randomly select one.
-            max_q_value_indices = np.where(
-                q_table[process_state(raw_state)]
-                == q_table[process_state(raw_state)].max()
-            )[0]
-            action = random.choice(max_q_value_indices)
+            action = np.argmax(q_table[process_state(raw_state)])
         old_raw_state = raw_state
         raw_state, reward, done, info = env.step(action)
         episode_reward += reward
-
-        # Update the q-table
-        if done:
-            reward -= 200
+        
         # print("terminating state", process_state(old_raw_state))
         oldv = q_table[(process_state(old_raw_state), action)]
         q_table[process_state(old_raw_state), action] = (1 - ALPHA) * oldv + ALPHA * (
-            reward + GAMMA * np.argmax(q_table[process_state(raw_state)])
+            reward + GAMMA * np.max(q_table[process_state(raw_state)])
         )
         if done:
             break
