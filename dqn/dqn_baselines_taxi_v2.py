@@ -38,7 +38,7 @@ def main(args):
         exploration_fraction=0.1,
         exploration_final_eps=0.02,
     )
-    model.learn(total_timesteps=args.max_timesteps, callback=callback)
+    model.learn(total_timesteps=args.max_timesteps, callback=callback, seed=1)
 
     print("Finished")
 
