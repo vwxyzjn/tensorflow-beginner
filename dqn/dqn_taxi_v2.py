@@ -4,6 +4,7 @@ import multiprocessing
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from stable_baselines.deepq.replay_buffer import ReplayBuffer
 import random
 from typing import List, Tuple
 
@@ -63,30 +64,6 @@ def get_explore_rate(t):
     )
 
 
-# Replay Memory
-class ExperienceReplay:
-    def __init__(self, buffer_size=50000):
-        """ Data structure used to hold game experiences """
-        # Buffer will contain [state,action,reward,next_state,done]
-        self.buffer = np.empty((0, 5), int)
-        self.buffer_size = buffer_size
-
-    def add(self, experience):
-        """ Adds list of experiences to the buffer """
-        # Extend the stored experiences
-        self.buffer = np.append(self.buffer, np.array([experience]), axis=0)
-        # Keep the last buffer_size number of experiences
-        self.buffer = self.buffer[-self.buffer_size :]
-
-    def sample(self, size: int) -> List[List]:
-        """ Returns a sample of experiences from the buffer """
-        if len(self.buffer) < size:
-            size = len(self.buffer)
-        sample_idxs = np.random.randint(len(self.buffer), size=size)
-        sample_output = [self.buffer[idx] for idx in sample_idxs]
-        return np.array(sample_output)
-
-
 # Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
 ALPHA = 1e-3  # learning rate
@@ -118,8 +95,8 @@ tf.random.set_random_seed(SEED)
 
 def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     with tf.variable_scope(scope):
-        observation = tf.placeholder(tf.float32, [None, 1])
-        pred = tf.placeholder(tf.float32, [None,])
+        observation = tf.placeholder(tf.float32, [None, 1], name="observation")
+        pred = tf.placeholder(tf.float32, [None], name="pred")
         fc1 = tf.contrib.layers.fully_connected(
             inputs=observation,
             num_outputs=64,
@@ -138,7 +115,6 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
             activation_fn=None,
             weights_initializer=tf.contrib.layers.xavier_initializer(),
         )
-        action_distribution = tf.nn.softmax(fc3)
         q_value = tf.math.reduce_max(fc3, axis=1)
         loss = tf.losses.huber_loss(q_value, pred)
         train_opt = tf.train.AdamOptimizer(ALPHA).minimize(loss)
@@ -149,7 +125,6 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
         fc3,
         observation,
         pred,
-        action_distribution,
         q_value,
         loss,
         train_opt,
@@ -162,7 +137,6 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     fc3,
     observation,
     pred,
-    action_distribution,
     q_value,
     loss,
     train_opt,
@@ -173,7 +147,6 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
     target_fc3,
     target_observation,
     target_pred,
-    target_action_distribution,
     target_q_value,
     target_loss,
     target_train_opt,
@@ -182,13 +155,14 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
 ) = build_neural_network("target_network")
 
 # Start the training process
-with make_session(8) as sess:
+with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
     writer = tf.summary.FileWriter("./logs")
     restore_training_variables(
         "target_network", backup_training_variables("q_network", sess), sess
     )
-    er = ExperienceReplay()
+    random_actions_taken = 0
+    er = ReplayBuffer(50000)
     episode_rewards = []
     finished_episodes_count = 0
     target_network_update_counter = 0
@@ -204,40 +178,41 @@ with make_session(8) as sess:
             # env.render()
             if random.random() < epsilon:
                 action = random.randint(0, env.action_space.n - 1)
+                random_actions_taken += 1
             else:
-                evaluated_action_probability = sess.run(
-                    action_distribution, feed_dict={observation: [[raw_state]]}
+                evaluated_fc3 = sess.run(
+                    fc3, feed_dict={observation: [[raw_state]]}
                 )
-                action = np.argmax(evaluated_action_probability)
+                action = np.argmax(evaluated_fc3[0])
             old_raw_state = raw_state
             raw_state, reward, done, info = env.step(action)
             episode_reward += reward
 
             # Store transition in the experience replay
-            er.add([old_raw_state, action, reward, raw_state, done])
+            if done == 1:
+                done_int = 1
+            else:
+                done_int = 0
+            er.add(old_raw_state, action, reward, raw_state, done_int)
 
             # Sample random minibatch of trasitions from the experience replay
-            if len(er.buffer) < EXPERIENCER_REPLAY_BATCH_SIZE:
+            if total_timesteps < 1000:
                 continue
-            batch = er.sample(EXPERIENCER_REPLAY_BATCH_SIZE)
+            obses_t, actions, rewards, obses_tp1, dones = er.sample(32)
 
             if done:
                 finished_episodes_count += 1
 
             # Predict
-            # use the raw_state from the replay buffer, which is the column at index-3
-            # https://stackoverflow.com/questions/4455076/how-to-access-the-ith-column-of-a-numpy-multidimensional-array
-            # This is wrong.
             evaluated_target_q_value = sess.run(
-                target_q_value, feed_dict={target_observation: er.buffer[:, [3]]}
+                target_q_value, feed_dict={target_observation: obses_tp1.reshape((32,1))}
             )
-            y = reward + GAMMA * evaluated_target_q_value
-            
+            y = rewards + GAMMA * evaluated_target_q_value * (1 - dones)
 
             # Train
             _, summary = sess.run(
                 [train_opt, write_op],
-                feed_dict={observation: er.buffer[:, [0]], pred: y},
+                feed_dict={observation: obses_t.reshape((32,1)), pred: y},
             )  # the 0-index column is the old_raw_state
 
             writer.add_summary(summary, total_timesteps)
@@ -263,6 +238,10 @@ with make_session(8) as sess:
             episode_reward,
             "with successful drop-offs of",
             finished_episodes_count,
+            "random_actions_taken",
+            random_actions_taken,
+            "epsilon",
+            epsilon
         )
         episode_rewards += [episode_reward]
         if total_timesteps > TOTAL_MAX_TIMESTEPS:
