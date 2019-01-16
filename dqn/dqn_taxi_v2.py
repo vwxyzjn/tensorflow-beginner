@@ -12,19 +12,22 @@ tf.reset_default_graph()
 # Utility functions
 def backup_training_variables(scope: str, sess: tf.Session) -> List[List]:
     variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-    vars_values: List[List] = []
-    for var in variables:
-        vars_values += [sess.run(var)]
-    return vars_values
+    return sess.run(variables)
 
 
 def restore_training_variables(
     scope: str, vars_values: List[List], sess: tf.Session
 ) -> None:
     variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
+    ops = []
     for i, var in enumerate(variables):
-        sess.run(tf.assign(var, vars_values[i]))
+        ops.append(tf.assign(var, vars_values[i]))
+    sess.run(tf.group(*ops))
 
+
+def render_env(state, env):
+    env.s = state
+    env.render()
 
 # https://stable-baselines.readthedocs.io/en/master/_modules/stable_baselines/common/tf_util.html#make_session
 def make_session(num_cpu=None, make_default=False, graph=None):
