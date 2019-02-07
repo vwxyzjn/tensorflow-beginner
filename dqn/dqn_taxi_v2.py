@@ -30,30 +30,6 @@ def render_env(state, env):
     env.s = state
     env.render()
 
-# https://stable-baselines.readthedocs.io/en/master/_modules/stable_baselines/common/tf_util.html#make_session
-def make_session(num_cpu=None, make_default=False, graph=None):
-    """
-    Returns a session that will use <num_cpu> CPU's only
-
-    :param num_cpu: (int) number of CPUs to use for TensorFlow
-    :param make_default: (bool) if this should return an InteractiveSession or a normal Session
-    :param graph: (TensorFlow Graph) the graph of the session
-    :return: (TensorFlow session)
-    """
-    if num_cpu is None:
-        num_cpu = int(os.getenv("RCALL_NUM_CPU", multiprocessing.cpu_count()))
-    tf_config = tf.ConfigProto(
-        allow_soft_placement=True,
-        inter_op_parallelism_threads=num_cpu,
-        intra_op_parallelism_threads=num_cpu,
-    )
-    # Prevent tensorflow from taking all the gpu memory
-    tf_config.gpu_options.allow_growth = True
-    if make_default:
-        return tf.InteractiveSession(config=tf_config, graph=graph)
-    else:
-        return tf.Session(config=tf_config, graph=graph)
-
 
 # functions for graduatlly decrease learning rate using linear functions
 def get_explore_rate(t):
@@ -66,7 +42,7 @@ def get_explore_rate(t):
 
 # Hypterparameters
 # https://en.wikipedia.org/wiki/Q-learning
-ALPHA = 1e-3 # learning rate
+ALPHA = 1e-3  # learning rate
 EPSILON_MAX = 1  # exploration rate
 EPSILON_MIN = 0.05
 GAMMA = 0.99  # discount factor
@@ -98,11 +74,13 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
         # Because this is discrete(500) observation space, we actually need to use the one-hot
         # tensor to make training easier.
         # https://github.com/hill-a/stable-baselines/blob/a6f7459a301a7ba3c4bbcebff5829ea054ae802f/stable_baselines/common/input.py#L20
-        # So, instead of 
+        # So, instead of
         # observation = tf.placeholder(tf.float32, [None, 1], name="observation")
         # We use
         observation = tf.placeholder(shape=(None,), dtype=tf.int32)
-        processed_observations = tf.to_float(tf.one_hot(observation, env.observation_space.n))
+        processed_observations = tf.to_float(
+            tf.one_hot(observation, env.observation_space.n)
+        )
         pred = tf.placeholder(tf.float32, [None], name="pred")
         q_value_index = tf.placeholder(tf.int32, [None], name="q_value_index")
         fc1 = tf.contrib.layers.fully_connected(
@@ -125,7 +103,9 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
         )
         max_q_value = tf.math.reduce_max(fc3, axis=1)
         # https://github.com/hill-a/stable-baselines/blob/88a5c5d50a7f6ad1f44f6ef0feaa0647ed2f7298/stable_baselines/deepq/build_graph.py#L394
-        q_value = tf.reduce_sum(fc3 * tf.one_hot(q_value_index, env.action_space.n), axis=1)
+        q_value = tf.reduce_sum(
+            fc3 * tf.one_hot(q_value_index, env.action_space.n), axis=1
+        )
         loss = tf.losses.mean_squared_error(q_value, pred)
         train_opt = tf.train.GradientDescentOptimizer(ALPHA).minimize(loss)
         saver = tf.train.Saver()
@@ -219,8 +199,7 @@ for i_episode in range(NUM_EPISODES):
 
         # Predict
         evaluated_target_max_q_value = sess.run(
-            target_max_q_value,
-            feed_dict={target_observation: obses_tp1},
+            target_max_q_value, feed_dict={target_observation: obses_tp1}
         )
         y = rewards + GAMMA * evaluated_target_max_q_value * (1 - dones)
 
@@ -246,8 +225,8 @@ for i_episode in range(NUM_EPISODES):
             save_path = saver.save(sess, "./tmp/model.ckpt")
             print("Model saved in path: %s" % save_path)
 
-#            if total_timesteps > 15000:
-#                print("debug")
+    #            if total_timesteps > 15000:
+    #                print("debug")
 
     print(
         "Episode: ",
