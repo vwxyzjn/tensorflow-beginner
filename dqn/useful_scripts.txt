@@ -1,0 +1,90 @@
+sorted(er._storage, key=lambda x: x[2])[-32:]
+sorted(er._storage, key=lambda x: x[2])[:32]
+
+ (16, 5, 20, 16, 1),
+ (16, 5, 20, 16, 1),
+ (479, 5, 20, 479, 1)
+
+sess.run(fc3, feed_dict={observation: [[479]]})
+sess.run(fc3, feed_dict={observation: [[1]]})
+
+sess = tf.Session()
+saver.restore(sess, "./tmp/model.ckpt")
+
+er2 = ReplayBuffer(50000)
+er2._storage = sorted(er._storage, key=lambda x: x[2])[-32:]
+obses_t, actions, rewards, obses_tp1, dones = er2.sample(32)
+np.vstack((obses_t, actions, rewards, obses_tp1, dones)).T
+
+evaluated_target_max_q_value = sess.run(
+    target_max_q_value,
+    feed_dict={target_observation: obses_tp1.reshape((32, 1))},
+)
+
+sess.run(
+    q_value,
+    feed_dict={observation: obses_t.reshape((32, 1)), pred: y, q_value_index: actions.reshape((32, 1))},
+)
+
+sess.run(tf.one_hot(actions, env.action_space.n))
+
+sess.run(
+    fc3,
+    feed_dict={observation: obses_t.reshape((32, 1))},
+)
+
+
+=============================
+
+mini_train_data = np.array([
+    [479, 5, 20, 479, 1],
+    [479, 4, -10, 479, 0],
+    [479, 3, -1, 479, 0],
+    [479, 2, -1, 499, 0],
+    [479, 1, -1, 399, 0],
+    [479, 0, -1, 499, 0]
+])
+obses_t, actions, rewards, obses_tp1, dones = mini_train_data.T[0], mini_train_data.T[1], mini_train_data.T[2], mini_train_data.T[3], mini_train_data.T[4]
+
+def mini_train(print_outputs=True):
+    evaluated_fc3 = sess.run(
+        fc3,
+        feed_dict={observation: obses_t.reshape((6, 1))},
+    )
+    if print_outputs:
+        print("fc3:\n", evaluated_fc3)
+
+    evaluated_max_q_value = sess.run(
+        max_q_value,
+        feed_dict={observation: obses_tp1.reshape((6, 1))},
+    )
+    y = rewards + GAMMA * evaluated_max_q_value * (1 - dones)
+    if print_outputs:
+        print("evaluated_max_q_value:\n", evaluated_max_q_value)
+        print("y:\n", y)
+        print("q_value:\n", sess.run(
+            q_value,
+            feed_dict={observation: obses_t.reshape((6, 1)), pred: y.reshape((6,)), q_value_index: actions},
+        ))
+        print("next_state_fc3:\n", sess.run(
+            fc3,
+            feed_dict={observation: obses_tp1.reshape((6, 1))},
+        ))
+
+    _, summary = sess.run(
+        [train_opt, write_op],
+        feed_dict={observation: obses_t.reshape((6, 1)), pred: y.reshape((6,)), q_value_index: actions},
+    )
+
+sess.run(
+        fc3,
+        feed_dict={observation: [[479],[499],[399]]},
+    )
+    
+Out[6]: 
+array([[-18.15654  , -50.295536 ,  16.600374 , 101.28906  ,  37.23697  ,
+        104.29161  ],
+       [-18.91467  , -52.395576 ,  17.293499 , 105.518265 ,  38.791737 ,
+        108.64616  ],
+       [-15.124157 , -41.895462 ,  13.8278675,  84.37229  ,  31.01786  ,
+         86.87339  ]], dtype=float32)
