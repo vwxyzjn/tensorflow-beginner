@@ -107,7 +107,17 @@ def build_neural_network(scope: str) -> Tuple[tf.Variable]:
             fc3 * tf.one_hot(q_value_index, env.action_space.n), axis=1
         )
         loss = tf.losses.mean_squared_error(q_value, pred)
+
+        # Manual gradient desent step, which is equivalent to
         train_opt = tf.train.GradientDescentOptimizer(ALPHA).minimize(loss)
+        grads = tf.gradients(loss, tf.trainable_variables(scope))
+        vars_and_grads = list(zip(tf.trainable_variables(scope), grads))
+        ops = []
+        for item in vars_and_grads:
+            ops.append(tf.assign(item[0], item[0] - ALPHA * item[1]))
+        train_opt = tf.group(*ops)
+
+        #
         saver = tf.train.Saver()
         tf.summary.scalar("Loss", loss)
         write_op = tf.summary.merge_all()
