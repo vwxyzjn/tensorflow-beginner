@@ -12,10 +12,10 @@ import matplotlib.pyplot as plt
 tf.reset_default_graph()
 
 # Hyperparameters
-learning_rate = 1e-3
-gamma = 0.99
-seed = 0
-num_episodes = 2000
+learning_rate = 1e-4
+gamma = 0.98
+seed = 1
+num_episodes = 1000
 
 # Utility functions
 def get_dependent_varialbes(tensor):
