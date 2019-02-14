@@ -3,253 +3,114 @@ Author: Costa Huang
 This is an attempted reproduction of the REINFORCE algorithm in Sutton & Barto's book.
 http://incompleteideas.net/book/bookdraft2017nov5.pdf#page=289
 """
+
 import gym
 import tensorflow as tf
-import multiprocessing
-import os
 import numpy as np
 import matplotlib.pyplot as plt
-from stable_baselines.deepq.replay_buffer import ReplayBuffer
-import random
-from typing import List, Tuple
 
 tf.reset_default_graph()
 
+# Hyperparameters
+learning_rate = 1e-3
+gamma = 0.99
+seed = 0
+num_episodes = 2000
+
 # Utility functions
-def backup_training_variables(scope: str, sess: tf.Session) -> List[List]:
-    variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-    return sess.run(variables)
+def get_dependent_varialbes(tensor):
+    import collections
+
+    op_to_var = {var.op: var for var in tf.trainable_variables()}
+    dependent_vars = []
+    queue = collections.deque()
+    queue.append(tensor.op)
+    visited = set([tensor.op])
+    while queue:
+        op = queue.popleft()
+        try:
+            dependent_vars.append(op_to_var[op])
+        except KeyError:
+            # `op` is not a variable, so search its inputs (if any).
+            for op_input in op.inputs:
+                if op_input.op not in visited:
+                    queue.append(op_input.op)
+                    visited.add(op_input.op)
+    return dependent_vars
 
 
-def restore_training_variables(
-    scope: str, vars_values: List[List], sess: tf.Session
-) -> None:
-    variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=scope)
-    ops = []
-    for i, var in enumerate(variables):
-        ops.append(tf.assign(var, vars_values[i]))
-    sess.run(tf.group(*ops))
-
-
-def render_env(state, env):
-    env.s = state
-    env.render()
-
-def random_chooce_index(batch_tensors, probabilities, num_samples):
-    """
-    https://stackoverflow.com/questions/37757986/weighted-random-tensor-select-in-tensorflow
-    return num_samples of indices of selected tensor in batch_tensors according to probabilities.
-    """
-    rescaled_probas = tf.expand_dims(tf.log(probabilities), 0)
-    # We can now draw one example from the distribution (we could draw more)
-    indice = tf.multinomial(rescaled_probas, num_samples=num_samples)
-    return indice
-
-
-# functions for graduatlly decrease learning rate using linear functions
-def get_explore_rate(t):
-    return max(
-        (EPSILON_MIN - EPSILON_MAX) * t / MAX_EXPLORATION_RATE_DECAY_TIMESTEP
-        + EPSILON_MAX,
-        EPSILON_MIN,
-    )
-
-
-# Hypterparameters
-# https://en.wikipedia.org/wiki/Q-learning
-ALPHA = 1e-3 # learning rate
-EPSILON_MAX = 1  # exploration rate
-EPSILON_MIN = 0.05
-GAMMA = 0.99  # discount factor
-MAX_EXPLORATION_RATE_DECAY_TIMESTEP = 40000
-TARGET_NETWORK_UPDATE_STEP_FREQUENCY = 500
-EXPERIENCER_REPLAY_BATCH_SIZE = 32
-
-# Training parameters
-SEED = 1000
-NUM_EPISODES = 1000000
-MAX_NUM_STEPS = 200
-TOTAL_MAX_TIMESTEPS = 400000
-# we picked 2000 because on average, the random agent would make a successful drop-off after 2848.14
-# timesteps according to https://www.learndatasci.com/tutorials/reinforcement-q-learning-scratch-python-openai-gym/
-
-## Initialize env
+# Set up the env
 env = gym.make("CartPole-v0")
-random.seed(SEED)
-env.seed(SEED)
-np.random.seed(SEED)
-tf.random.set_random_seed(SEED)
+np.random.seed(seed)
+tf.random.set_random_seed(seed)
+env.seed(seed)
 
+obs_ph = tf.placeholder(shape=(None,) + env.observation_space.shape, dtype=tf.float64)
+fc1 = tf.layers.dense(inputs=obs_ph, units=64)
+fc2 = tf.layers.dense(inputs=fc1, units=64)
+fc3 = tf.layers.dense(inputs=fc2, units=env.action_space.n)
+action_probs = tf.nn.softmax(fc3)
+action_probs_chosen_indices_ph = tf.placeholder(shape=(None), dtype=tf.int32)
+action_probs_chosen = tf.gather_nd(action_probs, action_probs_chosen_indices_ph)
+future_rewards_ph = tf.placeholder(shape=(None), dtype=tf.float64)
+temp = tf.reduce_mean(tf.log(action_probs_chosen) * future_rewards_ph)
 
-def build_neural_network(scope: str) -> Tuple[tf.Variable]:
-    with tf.variable_scope(scope):
-        # Because this is discrete(500) observation space, we actually need to use the one-hot
-        # tensor to make training easier.
-        # https://github.com/hill-a/stable-baselines/blob/a6f7459a301a7ba3c4bbcebff5829ea054ae802f/stable_baselines/common/input.py#L20
-        # So, instead of 
-        # observation = tf.placeholder(tf.float32, [None, 1], name="observation")
-        # We use
-        observation = tf.placeholder(shape=(None, env.observation_space.shape))
-        pred = tf.placeholder(tf.float32, [None], name="pred")
-        q_value_index = tf.placeholder(tf.int32, [None], name="q_value_index")
-        fc1 = tf.contrib.layers.fully_connected(
-            inputs=observation,
-            num_outputs=64,
-            activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(),
-        )
-        fc2 = tf.contrib.layers.fully_connected(
-            inputs=fc1,
-            num_outputs=64,
-            activation_fn=tf.nn.relu,
-            weights_initializer=tf.contrib.layers.xavier_initializer(),
-        )
-        fc3 = tf.contrib.layers.fully_connected(
-            inputs=fc2,
-            num_outputs=env.action_space.n,
-            activation_fn=None,
-            weights_initializer=tf.contrib.layers.xavier_initializer(),
-        )
-        action_probability = tf.nn.softmax(fc3)
-        # https://github.com/hill-a/stable-baselines/blob/88a5c5d50a7f6ad1f44f6ef0feaa0647ed2f7298/stable_baselines/deepq/build_graph.py#L394
-        q_value = tf.reduce_sum(fc3 * tf.one_hot(q_value_index, env.action_space.n), axis=1)
-        loss = tf.losses.mean_squared_error(q_value, pred)
-        train_opt = tf.train.GradientDescentOptimizer(ALPHA).minimize(loss)
-        saver = tf.train.Saver()
-        tf.summary.scalar("Loss", loss)
-        write_op = tf.summary.merge_all()
-    return (
-        fc3,
-        observation,
-        pred,
-        max_q_value,
-        q_value,
-        loss,
-        train_opt,
-        saver,
-        write_op,
-        q_value_index,
-    )
+# Update paramaters
+# train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
+cost_related_vars = get_dependent_varialbes(temp)
+grads = tf.gradients(temp, cost_related_vars)
+vars_and_grads = list(zip(cost_related_vars, grads))
+ops = []
+for item in vars_and_grads:
+    ops.append(tf.assign(item[0], item[0] + learning_rate * item[1]))
+train_op = tf.group(*ops)
 
-
-(
-    fc3,
-    observation,
-    pred,
-    max_q_value,
-    q_value,
-    loss,
-    train_opt,
-    saver,
-    write_op,
-    q_value_index,
-) = build_neural_network("q_network")
-(
-    target_fc3,
-    target_observation,
-    target_pred,
-    target_max_q_value,
-    target_q_value,
-    target_loss,
-    target_train_opt,
-    target_saver,
-    target_write_op,
-    target_q_value_index,
-) = build_neural_network("target_network")
-
-# Start the training process
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-writer = tf.summary.FileWriter("./logs", sess.graph_def)
-restore_training_variables(
-    "target_network", backup_training_variables("q_network", sess), sess
-)
-random_actions_taken = 0
-er = ReplayBuffer(50000)
+
 episode_rewards = []
-finished_episodes_count = 0
-target_network_update_counter = 0
-total_timesteps = 0
-for i_episode in range(NUM_EPISODES):
-    raw_state = env.reset()
-    done = False
-    episode_reward = 0
-    for t in range(MAX_NUM_STEPS):
-        epsilon = get_explore_rate(total_timesteps)
-        total_timesteps += 1
-        target_network_update_counter += 1
-        # env.render()
-        if random.random() < epsilon:
-            action = random.randint(0, env.action_space.n - 1)
-            random_actions_taken += 1
-        else:
-            evaluated_fc3 = sess.run(fc3, feed_dict={observation: [raw_state]})
-            action = np.argmax(evaluated_fc3[0])
-        old_raw_state = raw_state
-        raw_state, reward, done, info = env.step(action)
-        episode_reward += reward
+for i_episode in range(num_episodes):
+    state = env.reset()
+    episode = []
+    states = []
+    actions_taken = []
+    rewards = []
+    # One step in the environment
+    for t in range(200):
 
-        # Store transition in the experience replay
-        if done == 1:
-            done_int = 1
-        else:
-            done_int = 0
-        er.add(old_raw_state, action, reward, raw_state, done_int)
-
-        # Sample random minibatch of trasitions from the experience replay
-        if total_timesteps < 1000:
-            continue
-        obses_t, actions, rewards, obses_tp1, dones = er.sample(32)
-
-        if done:
-            finished_episodes_count += 1
-
-        # Predict
-        evaluated_target_max_q_value = sess.run(
-            target_max_q_value,
-            feed_dict={target_observation: obses_tp1},
+        # Take a step
+        evaluated_action_probs = sess.run(action_probs, feed_dict={obs_ph: [state]})
+        action = np.random.choice(
+            np.arange(len(evaluated_action_probs[0])), p=evaluated_action_probs[0]
         )
-        y = rewards + GAMMA * evaluated_target_max_q_value * (1 - dones)
+        next_state, reward, done, _ = env.step(action)
 
-        # Train
-        _, summary = sess.run(
-            [train_opt, write_op],
-            feed_dict={observation: obses_t, pred: y, q_value_index: actions},
-        )  # the 0-index column is the old_raw_state
-
-        writer.add_summary(summary, total_timesteps)
-
-        # Update the target network
-        if target_network_update_counter > TARGET_NETWORK_UPDATE_STEP_FREQUENCY:
-            restore_training_variables(
-                "target_network", backup_training_variables("q_network", sess), sess
-            )
-            target_network_update_counter = 0
+        # Keep track of the transition
+        states += [state]
+        actions_taken += [action]
+        rewards += [reward]
 
         if done:
             break
 
-        if total_timesteps % 10000 == 0:
-            save_path = saver.save(sess, "./tmp/model.ckpt")
-            print("Model saved in path: %s" % save_path)
+        state = next_state
 
-#            if total_timesteps > 15000:
-#                print("debug")
+    if i_episode % 10 == 0:
+        print(f"i_episode = {i_episode}, rewards = {sum(rewards)}")
+        episode_rewards += [sum(rewards)]
 
-    print(
-        "Episode: ",
-        i_episode,
-        "finished with rewards of ",
-        episode_reward,
-        "with successful drop-offs of",
-        finished_episodes_count,
-        "random_actions_taken",
-        random_actions_taken,
-        "epsilon",
-        epsilon,
-    )
-    episode_rewards += [episode_reward]
-    if total_timesteps > TOTAL_MAX_TIMESTEPS:
-        break
+    # Go through the episode and make policy updates
+    for t, item in enumerate(rewards):
+        # The return after this timestep
+        future_rewards = sum(rewards[t + 1 :])
+        sess.run(
+            train_op,
+            feed_dict={
+                obs_ph: [states[t]],
+                action_probs_chosen_indices_ph: list(enumerate([actions_taken[t]])),
+                future_rewards_ph: future_rewards * gamma ** (t),
+            },
+        )
+
 
 plt.plot(episode_rewards)
