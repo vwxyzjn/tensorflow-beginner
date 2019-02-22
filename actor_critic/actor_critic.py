@@ -26,13 +26,8 @@ env.seed(seed)
 
 # Set up the neural network
 obs_ph = tf.placeholder(shape=(None,) + env.observation_space.shape, dtype=tf.float64)
-obs_tp1_ph = tf.placeholder(
-    shape=(None,) + env.observation_space.shape, dtype=tf.float64
-)
 action_probs_chosen_indices_ph = tf.placeholder(shape=(None), dtype=tf.int32)
-I_t_ph = tf.placeholder(shape=(None), dtype=tf.float64)
-done_ph = tf.placeholder(tf.float64)
-rew_ph = tf.placeholder(shape=(None), dtype=tf.float64)
+delta_I_ph = tf.placeholder(tf.float64)
 
 # Set up the policy parameterization
 fc1 = tf.layers.dense(inputs=obs_ph, units=64)
@@ -51,19 +46,13 @@ def _state_value(x):
 
 state_value_func = tf.make_template("state_value_func", _state_value)
 state_value_t = state_value_func(obs_ph)
-state_value_tp1 = state_value_func(obs_tp1_ph)
-
-# calculate td errors
-delta = rew_ph + gamma * state_value_tp1 * (1.0 - done_ph) - state_value_t
 
 # train both
-temp = tf.reduce_mean(tf.log(action_probs_chosen) * I_t_ph * delta)
+temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_I_ph)
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
 
-temp1 = tf.reduce_mean(state_value_t * I_t_ph * delta)
-strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(
-    tf.square(temp1)
-)
+temp1 = tf.reduce_mean(state_value_t * delta_I_ph)
+strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(-temp1)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -72,58 +61,39 @@ episode_rewards = []
 with np.errstate(all="raise"):
     for i_episode in range(num_episodes):
         state = env.reset()
-        episode = []
-        states = []
-        actions_taken = []
+        I = 1
         rewards = []
-        dones = []
-        # One step in the environment
         for t in range(200):
-#            if i_episode >= 1000:
-#                env.render()
-            # Take a step
+            # perform action
             evaluated_action_probs = sess.run(action_probs, feed_dict={obs_ph: [state]})
             action = np.random.choice(
                 np.arange(len(evaluated_action_probs[0])), p=evaluated_action_probs[0]
             )
             next_state, reward, done, _ = env.step(action)
-            if done:
-                reward = -20
-            # Keep track of the transition
-            states += [state]
-            actions_taken += [action]
             rewards += [reward]
+
+            # train
+            sv_t = sess.run(tf.reduce_mean(state_value_t), {obs_ph: [state]})
+            sv_tp1 = sess.run(tf.reduce_mean(state_value_t), {obs_ph: [next_state]})
             if done:
-                dones += [1.0]
+                delta_I = (reward - sv_t) * I
             else:
-                dones += [0.0]
+                delta_I = (reward + gamma * sv_tp1 - sv_t) * I
+            sess.run(
+                [train_op, strain_op],
+                feed_dict={
+                    obs_ph: [state],
+                    action_probs_chosen_indices_ph: list(enumerate([action])),
+                    delta_I_ph: delta_I,
+                },
+            )
+            I = gamma * I
+            state = next_state
             if done:
                 break
-
-            state = next_state
 
         if i_episode % 10 == 0:
             print(f"i_episode = {i_episode}, rewards = {sum(rewards)}")
             episode_rewards += [sum(rewards)]
-
-        # Go through the episode and make policy updates
-        I = 1
-        for t, item in enumerate(rewards):
-            # The return after this timestep
-            if t == len(rewards) - 2:
-                break
-            sess.run(
-                [train_op, strain_op],
-                feed_dict={
-                    obs_ph: [states[t]],
-                    obs_tp1_ph: [states[t + 1]],
-                    action_probs_chosen_indices_ph: list(enumerate([actions_taken[t]])),
-                    I_t_ph: I,
-                    done_ph: dones[t],
-                    rew_ph: rewards[t],
-                },
-            )
-            I = gamma * I
-            # print(I, gamma ** t)
 
     plt.plot(episode_rewards)
