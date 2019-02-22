@@ -13,8 +13,8 @@ tf.reset_default_graph()
 
 # Hyperparameters
 learning_rate = 1e-5
-learning_rate_state = 1e-4
-gamma = 0.99
+learning_rate_state = 1e-3
+gamma = 0.97
 seed = 0
 num_episodes = 5000
 
@@ -47,6 +47,13 @@ def _state_value(x):
 state_value_func = tf.make_template("state_value_func", _state_value)
 state_value_t = state_value_func(obs_ph)
 
+# Calculate delta
+obs_tp1_ph = tf.placeholder(shape=(None,) + env.observation_space.shape, dtype=tf.float64)
+rew_ph = tf.placeholder(tf.float64)
+done_ph = tf.placeholder(tf.float64)
+state_value_tp1 = state_value_func(obs_tp1_ph)
+delta = tf.reduce_mean(rew_ph + gamma * state_value_tp1 * (1.0 - done_ph) - state_value_t)
+
 # train both
 temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_I_ph)
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
@@ -73,18 +80,26 @@ with np.errstate(all="raise"):
             rewards += [reward]
 
             # train
-            sv_t = sess.run(tf.reduce_mean(state_value_t), {obs_ph: [state]})
-            sv_tp1 = sess.run(tf.reduce_mean(state_value_t), {obs_ph: [next_state]})
             if done:
-                delta_I = (reward - sv_t) * I
+                done_int = 1
             else:
-                delta_I = (reward + gamma * sv_tp1 - sv_t) * I
+                done_int = 0
+
+            evaluated_delta = sess.run(
+                delta,
+                feed_dict={
+                    obs_ph: [state],
+                    obs_tp1_ph: [next_state],
+                    rew_ph: float(reward),
+                    done_ph: float(done_int),
+                },
+            )
             sess.run(
                 [train_op, strain_op],
                 feed_dict={
                     obs_ph: [state],
                     action_probs_chosen_indices_ph: list(enumerate([action])),
-                    delta_I_ph: delta_I,
+                    delta_I_ph: evaluated_delta * I,
                 },
             )
             I = gamma * I
