@@ -120,5 +120,12 @@ with np.errstate(all="raise"):
             print(f"i_episode = {i_episode}, rewards = {sum(rewards)}")
             episode_rewards += [sum(rewards)]
 
+    # raw plot
     plt.plot(episode_rewards)
+    plt.show()
+    # smooth plot
+    from scipy.ndimage.filters import gaussian_filter1d
+    smoothed_rewards = gaussian_filter1d(episode_rewards, sigma=2)
+    plt.plot(smoothed_rewards)
+    plt.show()
     print(f"average rewards is {np.mean(episode_rewards)}")
