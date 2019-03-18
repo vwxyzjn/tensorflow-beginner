@@ -55,10 +55,12 @@ state_value_tp1 = state_value_func(obs_tp1_ph)
 delta = tf.reduce_mean(rew_ph + gamma * state_value_tp1 * (1.0 - done_ph) - state_value_t)
 
 # train both
-temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_I_ph)
+delta_ph = tf.placeholder(tf.float64)
+I_ph = tf.placeholder(tf.float64)
+temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_ph * I_ph)
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
 
-temp1 = tf.reduce_mean(state_value_t * delta_I_ph)
+temp1 = tf.reduce_mean(state_value_t * delta_ph * I_ph)
 strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(-temp1)
 
 sess = tf.Session()
@@ -99,7 +101,8 @@ with np.errstate(all="raise"):
                 feed_dict={
                     obs_ph: [state],
                     action_probs_chosen_indices_ph: list(enumerate([action])),
-                    delta_I_ph: evaluated_delta * I,
+                    delta_ph: evaluated_delta,
+                    I_ph: I
                 },
             )
             I = gamma * I
