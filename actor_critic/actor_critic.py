@@ -12,9 +12,9 @@ import matplotlib.pyplot as plt
 tf.reset_default_graph()
 
 # Hyperparameters
-learning_rate = 1e-5
-learning_rate_state = 1e-3
-gamma = 0.97
+learning_rate = 0.001
+learning_rate_state = 0.005
+gamma = 0.99
 seed = 0
 num_episodes = 5000
 
@@ -27,7 +27,6 @@ env.seed(seed)
 # Set up the neural network
 obs_ph = tf.placeholder(shape=(None,) + env.observation_space.shape, dtype=tf.float64)
 action_probs_chosen_indices_ph = tf.placeholder(shape=(None), dtype=tf.int32)
-delta_I_ph = tf.placeholder(tf.float64)
 
 # Set up the policy parameterization
 fc1 = tf.layers.dense(inputs=obs_ph, units=64)
@@ -60,8 +59,8 @@ I_ph = tf.placeholder(tf.float64)
 temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_ph * I_ph)
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
 
-temp1 = tf.reduce_mean(state_value_t * delta_ph * I_ph)
-strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(-temp1)
+temp1 = tf.square(delta)
+strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(temp1)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
@@ -84,6 +83,10 @@ with np.errstate(all="raise"):
             # train
             if done:
                 done_int = 1
+                if t > 198:
+                    reward = 20
+                else:
+                    reward = -20
             else:
                 done_int = 0
 
@@ -99,10 +102,13 @@ with np.errstate(all="raise"):
             sess.run(
                 [train_op, strain_op],
                 feed_dict={
-                    obs_ph: [state],
                     action_probs_chosen_indices_ph: list(enumerate([action])),
                     delta_ph: evaluated_delta,
-                    I_ph: I
+                    I_ph: I,
+                    obs_ph: [state],
+                    obs_tp1_ph: [next_state],
+                    rew_ph: float(reward),
+                    done_ph: float(done_int),
                 },
             )
             I = gamma * I
@@ -115,3 +121,4 @@ with np.errstate(all="raise"):
             episode_rewards += [sum(rewards)]
 
     plt.plot(episode_rewards)
+    print(f"average rewards is {np.mean(episode_rewards)}")
