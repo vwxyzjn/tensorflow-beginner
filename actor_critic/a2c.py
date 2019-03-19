@@ -43,8 +43,8 @@ fc2 = tf.layers.dense(inputs=fc1, units=64)
 fc3 = tf.layers.dense(inputs=fc2, units=env.action_space.n)
 action_probs = tf.nn.softmax(fc3)
 action_probs_chosen_indices_ph = tf.placeholder(shape=(None), dtype=tf.int32)
-neglogprob = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=fc3, 
-                                                            labels=action_probs_chosen_indices_ph)
+action_probs_chosen = tf.gather_nd(action_probs,
+                                   action_probs_chosen_indices_ph)
 
 # state value function
 sfc1 = tf.layers.dense(inputs=obs_ph, units=64)
@@ -54,7 +54,7 @@ state_value_ph = tf.placeholder(tf.float64)
 
 # train
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(
-    tf.reduce_mean(neglogprob * (R_ph - state_value_ph)))
+    tf.reduce_mean(-tf.log(action_probs_chosen) * (R_ph - state_value_ph)))
 strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(
     (R_ph - tf.reduce_mean(state_value)) ** 2)
 
@@ -76,21 +76,15 @@ for i_episode in range(num_episodes):
             np.arange(len(evaluated_action_probs[0])),
             p=evaluated_action_probs[0])
         next_state, reward, done, _ = env.step(action)
-        rewards += [reward]
 
         # Keep track of the transition
         if done:
             done_int = 1
-            if t == 199:
-                reward = 20
-            else:
-                reward = -20
         else:
             done_int = 0
-            
         episode_replays += [[state, action, next_state,
                              reward, done_int, evaluated_state_value]]
-        
+        rewards += [reward]
 
         if done:
             break
@@ -120,7 +114,8 @@ for i_episode in range(num_episodes):
             [train_op, strain_op],
             feed_dict={
                 obs_ph: [episode_replays[t][state_idx]],
-                action_probs_chosen_indices_ph: [episode_replays[t][action_idx]],
+                action_probs_chosen_indices_ph: list(
+                    enumerate([episode_replays[t][action_idx]])),
                 R_ph: R,
                 state_value_ph: episode_replays[t][state_idx]
             },
