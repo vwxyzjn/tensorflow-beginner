@@ -103,13 +103,6 @@ for i_episode in range(num_episodes):
                      obs_ph: episode_replays[-1][next_state_idx]})
     for t in range(len(rewards) - 1, -1, -1):
         R = episode_replays[t][reward_idx] + gamma * R
-#        print(R)
-#        print(sess.run(
-#            state_value,
-#            feed_dict={
-#                obs_ph: [episode_replays[t][state_idx]],
-#            },
-#        ))
         sess.run(
             [train_op, strain_op],
             feed_dict={
