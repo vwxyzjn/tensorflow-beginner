@@ -12,11 +12,11 @@ import matplotlib.pyplot as plt
 tf.reset_default_graph()
 
 # Hyperparameters
-learning_rate = 0.001
-learning_rate_state = 0.005
+learning_rate = 0.0005
+learning_rate_state = 0.001
 gamma = 0.99
 seed = 0
-num_episodes = 5000
+num_episodes = 10000
 
 # Set up the env
 env = gym.make("CartPole-v0")
@@ -33,7 +33,7 @@ fc1 = tf.layers.dense(inputs=obs_ph, units=64)
 fc2 = tf.layers.dense(inputs=fc1, units=64)
 fc3 = tf.layers.dense(inputs=fc2, units=env.action_space.n)
 action_probs = tf.nn.softmax(fc3)  # This is the pi(a|s, theta)
-action_probs_chosen = tf.gather_nd(action_probs, action_probs_chosen_indices_ph)
+neglogprob = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=fc3, labels=action_probs_chosen_indices_ph)
 
 # Set up the state-value function parameterization
 def _state_value(x):
@@ -56,22 +56,29 @@ delta = tf.reduce_mean(rew_ph + gamma * state_value_tp1 * (1.0 - done_ph) - stat
 # train both
 delta_ph = tf.placeholder(tf.float64)
 I_ph = tf.placeholder(tf.float64)
-temp = tf.reduce_mean(tf.log(action_probs_chosen) * delta_ph * I_ph)
-train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(-temp)
+p_loss = tf.reduce_mean(neglogprob * delta_ph * I_ph)
+train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(p_loss)
 
-temp1 = tf.square(delta)
-strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(temp1)
+v_loss = tf.square(delta)
+strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(v_loss)
+
+tf.summary.scalar("v_loss", v_loss)
+tf.summary.scalar("p_loss", p_loss)
+write_op = tf.summary.merge_all()
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
+writer = tf.summary.FileWriter("./logs", sess.graph_def)
 
 episode_rewards = []
+total_timesteps = 0
 with np.errstate(all="raise"):
     for i_episode in range(num_episodes):
         state = env.reset()
         I = 1
         rewards = []
         for t in range(200):
+            total_timesteps += 1
             # perform action
             evaluated_action_probs = sess.run(action_probs, feed_dict={obs_ph: [state]})
             action = np.random.choice(
@@ -79,12 +86,16 @@ with np.errstate(all="raise"):
             )
             next_state, reward, done, _ = env.step(action)
             rewards += [reward]
+            
+            #if i_episode >= 3100:
+                #print(sess.run([state_value_t, fc3], feed_dict={obs_ph: [state]}))
 
             # train
             if done:
                 done_int = 1
-                if t > 198:
+                if t == 199:
                     reward = 20
+                    print("it happened")
                 else:
                     reward = -20
             else:
@@ -99,10 +110,10 @@ with np.errstate(all="raise"):
                     done_ph: float(done_int),
                 },
             )
-            sess.run(
-                [train_op, strain_op],
+            _, _, summary = sess.run(
+                [train_op, strain_op, write_op],
                 feed_dict={
-                    action_probs_chosen_indices_ph: list(enumerate([action])),
+                    action_probs_chosen_indices_ph: [action],
                     delta_ph: evaluated_delta,
                     I_ph: I,
                     obs_ph: [state],
@@ -111,6 +122,7 @@ with np.errstate(all="raise"):
                     done_ph: float(done_int),
                 },
             )
+            writer.add_summary(summary, total_timesteps)
             I = gamma * I
             state = next_state
             if done:
