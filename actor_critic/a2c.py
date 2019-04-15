@@ -54,7 +54,7 @@ state_value_ph = tf.placeholder(tf.float64)
 
 # train
 train_op = tf.train.GradientDescentOptimizer(learning_rate).minimize(
-    tf.reduce_mean(action_probs_chosen * (R_ph - state_value_ph)))
+    tf.reduce_mean(-tf.log(action_probs_chosen) * (R_ph - state_value_ph)))
 strain_op = tf.train.GradientDescentOptimizer(learning_rate_state).minimize(
     (R_ph - tf.reduce_mean(state_value)) ** 2)
 
@@ -103,13 +103,6 @@ for i_episode in range(num_episodes):
                      obs_ph: episode_replays[-1][next_state_idx]})
     for t in range(len(rewards) - 1, -1, -1):
         R = episode_replays[t][reward_idx] + gamma * R
-#        print(R)
-#        print(sess.run(
-#            state_value,
-#            feed_dict={
-#                obs_ph: [episode_replays[t][state_idx]],
-#            },
-#        ))
         sess.run(
             [train_op, strain_op],
             feed_dict={
